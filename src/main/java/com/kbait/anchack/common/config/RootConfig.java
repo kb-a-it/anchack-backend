@@ -1,6 +1,10 @@
 package com.kbait.anchack.common.config;
 
+<<<<<<< HEAD
 import com.fasterxml.jackson.databind.ObjectMapper;
+=======
+import com.kbait.anchack.place.config.PlaceConfig;
+>>>>>>> origin/dev
 import com.kbait.anchack.rental.config.MolitRentConfig;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -32,7 +36,10 @@ import javax.sql.DataSource;
     "com.kbait.anchack.common.security",
     "com.kbait.anchack.rental.client"
 })
-@Import(MolitRentConfig.class)
+@Import({
+    MolitRentConfig.class,
+    PlaceConfig.class
+})
 @EnableTransactionManagement
 public class RootConfig {
 
