@@ -1,6 +1,7 @@
 package com.kbait.anchack.common.config;
 
-import com.kbait.anchack.rental.config.MolitRentConfig;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kbait.anchack.ingestion.config.MolitRentConfig;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -16,18 +17,19 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.web.client.RestTemplate;
 
 import javax.sql.DataSource;
 
 @Configuration
 @PropertySource(
-        value = "classpath:application.properties",
-        encoding = "UTF-8"
+    value = "classpath:application.properties",
+    encoding = "UTF-8"
 )
 @MapperScan("com.kbait.anchack.*.mapper")
 @ComponentScan(basePackages = {
-        "com.kbait.anchack.*.service",
-        "com.kbait.anchack.common.security"
+    "com.kbait.anchack.*.service",
+    "com.kbait.anchack.common.security"
 })
 @Import(MolitRentConfig.class)
 @EnableTransactionManagement
@@ -51,10 +53,8 @@ public class RootConfig {
         this.applicationContext = applicationContext;
     }
 
-    // HikariCP DataSource 설정
     @Bean
     public DataSource dataSource() {
-
         HikariConfig config = new HikariConfig();
 
         config.setDriverClassName(driver);
@@ -71,51 +71,55 @@ public class RootConfig {
         return new HikariDataSource(config);
     }
 
-    // Flyway 데이터베이스 마이그레이션 설정
     @Bean(initMethod = "migrate")
     public Flyway flyway(DataSource dataSource) {
-
         return Flyway.configure()
-                .dataSource(dataSource)
-                .baselineOnMigrate(true)
-                .baselineVersion("0")
-                .locations("classpath:db/migration")
-                .load();
+            .dataSource(dataSource)
+            .baselineOnMigrate(true)
+            .baselineVersion("0")
+            .locations("classpath:db/migration")
+            .load();
     }
 
-    // MyBatis SqlSessionFactory 설정
-    // Flyway 마이그레이션 이후 SqlSessionFactory가 생성되도록 순서를 보장
     @Bean
     public SqlSessionFactory sqlSessionFactory(
-            DataSource dataSource,
-            Flyway flyway
+        DataSource dataSource,
+        Flyway flyway
     ) throws Exception {
-
         SqlSessionFactoryBean factoryBean =
-                new SqlSessionFactoryBean();
+            new SqlSessionFactoryBean();
 
         factoryBean.setDataSource(dataSource);
 
         factoryBean.setConfigLocation(
-                applicationContext.getResource(
-                        "classpath:mybatis-config.xml"
-                )
+            applicationContext.getResource(
+                "classpath:mybatis-config.xml"
+            )
         );
 
         factoryBean.setMapperLocations(
-                applicationContext.getResources(
-                        "classpath*:mappers/**/*.xml"
-                )
+            applicationContext.getResources(
+                "classpath*:mappers/**/*.xml"
+            )
         );
 
         return factoryBean.getObject();
     }
 
-    // 트랜잭션 관리자 설정
     @Bean
     public DataSourceTransactionManager transactionManager(
-            DataSource dataSource
+        DataSource dataSource
     ) {
         return new DataSourceTransactionManager(dataSource);
+    }
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper();
     }
 }
