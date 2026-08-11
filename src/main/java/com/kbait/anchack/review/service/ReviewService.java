@@ -1,15 +1,19 @@
 package com.kbait.anchack.review.service;
 
 import com.kbait.anchack.review.domain.Review;
+import com.kbait.anchack.review.domain.ReviewReaction;
 import com.kbait.anchack.review.domain.ReviewScore;
 import com.kbait.anchack.review.dto.request.AdminReviewStatusRequest;
 import com.kbait.anchack.review.dto.request.ReviewCreateRequest;
 import com.kbait.anchack.review.dto.request.ReviewUpdateRequest;
+import com.kbait.anchack.review.dto.response.ReviewReactionResponse;
 import com.kbait.anchack.review.dto.response.ReviewResponse;
 import com.kbait.anchack.review.mapper.ReviewMapper;
+import com.kbait.anchack.review.mapper.ReviewReactionMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,16 +22,23 @@ import java.util.stream.Collectors;
 @Service
 public class ReviewService {
 
+    private static final String REACTION_LIKE = "LIKE";
+    private static final String REACTION_DISLIKE = "DISLIKE";
+
     private final ReviewMapper reviewMapper;
+    private final ReviewReactionMapper reviewReactionMapper;
 
     public ReviewService(
-        ReviewMapper reviewMapper
+        ReviewMapper reviewMapper,
+        ReviewReactionMapper reviewReactionMapper
     ) {
         this.reviewMapper = reviewMapper;
+        this.reviewReactionMapper = reviewReactionMapper;
     }
 
     public List<ReviewResponse> getReviewsByAdminDong(
-        Long adminDongId
+        Long adminDongId,
+        Long viewerId
     ) {
         if (adminDongId == null) {
             throw new IllegalArgumentException(
@@ -45,23 +56,20 @@ public class ReviewService {
             );
         }
 
-        return reviewMapper
-            .findActiveByAdminDongId(adminDongId)
-            .stream()
-            .map(review -> {
-                review.setCategoryScores(
-                    getCategoryScores(
-                        review.getReviewId()
-                    )
-                );
+        List<Review> reviews =
+            reviewMapper.findActiveByAdminDongId(adminDongId);
 
-                return ReviewResponse.from(review);
-            })
+        attachCategoryScores(reviews);
+        attachReactions(reviews, viewerId);
+
+        return reviews.stream()
+            .map(ReviewResponse::from)
             .collect(Collectors.toList());
     }
 
     public ReviewResponse getReview(
-        Long reviewId
+        Long reviewId,
+        Long viewerId
     ) {
         Review review = findReview(reviewId);
 
@@ -73,6 +81,11 @@ public class ReviewService {
 
         review.setCategoryScores(
             getCategoryScores(reviewId)
+        );
+
+        attachReactions(
+            Collections.singletonList(review),
+            viewerId
         );
 
         return ReviewResponse.from(review);
@@ -87,19 +100,14 @@ public class ReviewService {
             );
         }
 
-        return reviewMapper
-            .findByUserId(userId)
-            .stream()
-            .map(review -> {
-                review.setCategoryScores(
-                    getCategoryScores(
-                        review.getReviewId()
-                    )
-                );
+        List<Review> reviews =
+            reviewMapper.findByUserId(userId);
 
-                return ReviewResponse
-                    .fromForOwner(review);
-            })
+        attachCategoryScores(reviews);
+        attachReactions(reviews, userId);
+
+        return reviews.stream()
+            .map(ReviewResponse::fromForOwner)
             .collect(Collectors.toList());
     }
 
@@ -274,6 +282,87 @@ public class ReviewService {
         }
     }
 
+    /**
+     * 리뷰 좋아요 / 싫어요.
+     *
+     * 같은 반응을 다시 누르면 취소(삭제)되고, 반대 반응을 누르면 바뀐다.
+     * 자기 자신이 쓴 리뷰에도 반응은 남길 수 있게 허용한다(굳이 막을 이유가 없음).
+     */
+    @Transactional
+    public ReviewReactionResponse reactToReview(
+        Long userId,
+        Long reviewId,
+        String reactionType
+    ) {
+        if (userId == null) {
+            throw new SecurityException(
+                "로그인이 필요합니다."
+            );
+        }
+
+        Review review = findReview(reviewId);
+
+        if (!"ACTIVE".equals(review.getStatus())) {
+            throw new IllegalStateException(
+                "현재 반응을 남길 수 없는 리뷰입니다."
+            );
+        }
+
+        String normalizedType =
+            normalizeReactionType(reactionType);
+
+        ReviewReaction existing =
+            reviewReactionMapper.findByReviewAndUser(
+                reviewId,
+                userId
+            );
+
+        String myReaction;
+
+        if (existing == null) {
+            ReviewReaction reaction = new ReviewReaction();
+            reaction.setReviewId(reviewId);
+            reaction.setUserId(userId);
+            reaction.setReactionType(normalizedType);
+
+            int insertedCount =
+                reviewReactionMapper.insertReaction(reaction);
+
+            if (insertedCount != 1) {
+                throw new IllegalStateException(
+                    "리뷰 반응 저장에 실패했습니다."
+                );
+            }
+
+            myReaction = normalizedType;
+        } else if (normalizedType.equals(existing.getReactionType())) {
+            // 같은 버튼을 다시 누르면 취소한다.
+            reviewReactionMapper.deleteReaction(
+                existing.getReactionId()
+            );
+
+            myReaction = null;
+        } else {
+            // 좋아요 <-> 싫어요 전환
+            reviewReactionMapper.updateReactionType(
+                existing.getReactionId(),
+                normalizedType
+            );
+
+            myReaction = normalizedType;
+        }
+
+        Map<String, Object> counts =
+            reviewReactionMapper.countByReviewId(reviewId);
+
+        return new ReviewReactionResponse(
+            reviewId,
+            toLong(counts == null ? null : counts.get("likeCount")),
+            toLong(counts == null ? null : counts.get("dislikeCount")),
+            myReaction
+        );
+    }
+
     public List<ReviewResponse> getReviewsForAdmin(
         Long adminId,
         String status
@@ -283,19 +372,13 @@ public class ReviewService {
         String normalizedStatus =
             normalizeStatus(status);
 
-        return reviewMapper
-            .findAllForAdmin(normalizedStatus)
-            .stream()
-            .map(review -> {
-                review.setCategoryScores(
-                    getCategoryScores(
-                        review.getReviewId()
-                    )
-                );
+        List<Review> reviews =
+            reviewMapper.findAllForAdmin(normalizedStatus);
 
-                return ReviewResponse
-                    .fromForOwner(review);
-            })
+        attachCategoryScores(reviews);
+
+        return reviews.stream()
+            .map(ReviewResponse::fromForOwner)
             .collect(Collectors.toList());
     }
 
@@ -398,6 +481,123 @@ public class ReviewService {
                         + entry.getKey()
                 );
             }
+        }
+    }
+
+    private void attachCategoryScores(
+        List<Review> reviews
+    ) {
+        for (Review review : reviews) {
+            review.setCategoryScores(
+                getCategoryScores(review.getReviewId())
+            );
+        }
+    }
+
+    /**
+     * 리뷰 목록에 좋아요/싫어요 개수와, viewerId가 남긴 반응을 채워준다.
+     * viewerId가 null이면(비로그인) 개수만 채우고 myReaction은 비워둔다.
+     */
+    private void attachReactions(
+        List<Review> reviews,
+        Long viewerId
+    ) {
+        if (reviews.isEmpty()) {
+            return;
+        }
+
+        List<Long> reviewIds =
+            reviews.stream()
+                .map(Review::getReviewId)
+                .collect(Collectors.toList());
+
+        List<Map<String, Object>> counts =
+            reviewReactionMapper.countByReviewIds(reviewIds);
+
+        Map<Long, Map<String, Object>> countsByReviewId =
+            new LinkedHashMap<>();
+
+        for (Map<String, Object> row : counts) {
+            countsByReviewId.put(
+                toLong(row.get("reviewId")),
+                row
+            );
+        }
+
+        Map<Long, String> myReactionByReviewId =
+            new LinkedHashMap<>();
+
+        if (viewerId != null) {
+            List<ReviewReaction> myReactions =
+                reviewReactionMapper.findByReviewIdsAndUser(
+                    reviewIds,
+                    viewerId
+                );
+
+            for (ReviewReaction reaction : myReactions) {
+                myReactionByReviewId.put(
+                    reaction.getReviewId(),
+                    reaction.getReactionType()
+                );
+            }
+        }
+
+        for (Review review : reviews) {
+            Map<String, Object> row =
+                countsByReviewId.get(review.getReviewId());
+
+            review.setLikeCount(
+                toLong(row == null ? null : row.get("likeCount"))
+            );
+            review.setDislikeCount(
+                toLong(row == null ? null : row.get("dislikeCount"))
+            );
+            review.setMyReaction(
+                myReactionByReviewId.get(review.getReviewId())
+            );
+        }
+    }
+
+    private String normalizeReactionType(
+        String reactionType
+    ) {
+        if (
+            reactionType == null ||
+                reactionType.trim().isEmpty()
+        ) {
+            throw new IllegalArgumentException(
+                "반응 종류(reactionType)가 필요합니다."
+            );
+        }
+
+        String normalized =
+            reactionType.trim().toUpperCase();
+
+        if (
+            !REACTION_LIKE.equals(normalized) &&
+                !REACTION_DISLIKE.equals(normalized)
+        ) {
+            throw new IllegalArgumentException(
+                "반응 종류는 LIKE 또는 DISLIKE여야 합니다."
+            );
+        }
+
+        return normalized;
+    }
+
+    private long toLong(Object value) {
+        if (value == null) {
+            return 0L;
+        }
+
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException exception) {
+            return 0L;
         }
     }
 

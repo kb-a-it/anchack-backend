@@ -2,7 +2,9 @@ package com.kbait.anchack.review.controller;
 
 import com.kbait.anchack.common.security.JwtAuthenticationFilter;
 import com.kbait.anchack.review.dto.request.ReviewCreateRequest;
+import com.kbait.anchack.review.dto.request.ReviewReactionRequest;
 import com.kbait.anchack.review.dto.request.ReviewUpdateRequest;
+import com.kbait.anchack.review.dto.response.ReviewReactionResponse;
 import com.kbait.anchack.review.dto.response.ReviewResponse;
 import com.kbait.anchack.review.service.ReviewService;
 import org.springframework.http.HttpStatus;
@@ -42,11 +44,18 @@ public class ReviewController {
     @GetMapping
     public ResponseEntity<List<ReviewResponse>>
     getReviewsByAdminDong(
+        HttpServletRequest httpRequest,
         @RequestParam Long adminDongId
     ) {
+        // 좋아요/싫어요는 로그인하지 않아도 목록 조회는 되지만,
+        // 로그인한 사용자라면 내가 남긴 반응(myReaction)을 함께 내려준다.
+        Long viewerId =
+            getOptionalAuthenticatedUserId(httpRequest);
+
         List<ReviewResponse> reviews =
             reviewService.getReviewsByAdminDong(
-                adminDongId
+                adminDongId,
+                viewerId
             );
 
         return ResponseEntity.ok(reviews);
@@ -59,10 +68,14 @@ public class ReviewController {
      */
     @GetMapping("/{reviewId}")
     public ResponseEntity<ReviewResponse> getReview(
+        HttpServletRequest httpRequest,
         @PathVariable Long reviewId
     ) {
+        Long viewerId =
+            getOptionalAuthenticatedUserId(httpRequest);
+
         ReviewResponse review =
-            reviewService.getReview(reviewId);
+            reviewService.getReview(reviewId, viewerId);
 
         return ResponseEntity.ok(review);
     }
@@ -172,6 +185,34 @@ public class ReviewController {
     }
 
     /**
+     * 리뷰 좋아요 / 싫어요
+     *
+     * 같은 반응을 다시 누르면 취소되고, 반대 반응을 누르면 바뀐다.
+     *
+     * POST /api/reviews/1/reactions
+     * body: { "reactionType": "LIKE" | "DISLIKE" }
+     */
+    @PostMapping("/{reviewId}/reactions")
+    public ResponseEntity<ReviewReactionResponse> reactToReview(
+        HttpServletRequest httpRequest,
+        @PathVariable Long reviewId,
+        @RequestBody ReviewReactionRequest request
+    ) {
+        Long userId = getAuthenticatedUserId(
+            httpRequest
+        );
+
+        ReviewReactionResponse response =
+            reviewService.reactToReview(
+                userId,
+                reviewId,
+                request == null ? null : request.getReactionType()
+            );
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * JWT 필터가 request에 저장한 사용자 ID를 가져온다.
      */
     private Long getAuthenticatedUserId(
@@ -206,6 +247,21 @@ public class ReviewController {
             throw new SecurityException(
                 "유효하지 않은 인증 정보입니다."
             );
+        }
+    }
+
+    /**
+     * getAuthenticatedUserId()와 달리 로그인하지 않았어도 예외를 던지지 않고
+     * null을 반환한다. 공개 리뷰 조회에서 "내가 남긴 반응"을 선택적으로
+     * 채워주기 위해 사용한다.
+     */
+    private Long getOptionalAuthenticatedUserId(
+        HttpServletRequest request
+    ) {
+        try {
+            return getAuthenticatedUserId(request);
+        } catch (SecurityException exception) {
+            return null;
         }
     }
 }

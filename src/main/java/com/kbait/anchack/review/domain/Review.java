@@ -32,4 +32,11 @@ public class Review {
     // review_scores 조회 결과
     private Map<String, Integer> categoryScores =
         new LinkedHashMap<>();
+
+    // review_reactions(좋아요/싫어요) 집계 결과
+    private long likeCount = 0;
+    private long dislikeCount = 0;
+
+    // 현재 조회 중인 사용자의 반응("LIKE" / "DISLIKE" / null, 비로그인이면 null)
+    private String myReaction;
 }
