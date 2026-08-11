@@ -1,7 +1,7 @@
 package com.kbait.anchack.common.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kbait.anchack.ingestion.config.MolitRentConfig;
+import com.kbait.anchack.rental.config.MolitRentConfig;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -29,7 +29,8 @@ import javax.sql.DataSource;
 @MapperScan("com.kbait.anchack.*.mapper")
 @ComponentScan(basePackages = {
     "com.kbait.anchack.*.service",
-    "com.kbait.anchack.common.security"
+    "com.kbait.anchack.common.security",
+    "com.kbait.anchack.rental.client"
 })
 @Import(MolitRentConfig.class)
 @EnableTransactionManagement
